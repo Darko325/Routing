@@ -117,7 +117,9 @@
     },
     "dependencies": {
         "@mapbox/polyline": "^1.2.1",
-        "mapstore2": "file:MapStore2"
+        "mapstore2": "file:MapStore2",
+        "ol": "^10.1.0",
+        "proj4": "^2.12.0"
     },
     "scripts": {
         "start": "npm run app:start",

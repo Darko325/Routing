@@ -2,35 +2,81 @@ import React, { useState, useEffect } from 'react';
 import { connect } from 'react-redux';
 import { createPlugin } from '@mapstore/utils/PluginsUtils';
 import { changeMapView } from '@mapstore/actions/map';
-import { mapSelector } from '@mapstore/selectors/map';
-import L from 'leaflet';
+import { mapSelector, projectionSelector } from '@mapstore/selectors/map';
 import polyline from '@mapbox/polyline';
+import proj4 from 'proj4';
+import ol from 'ol';
 
-// Define the Routing component
-const Routing = ({ map, onChangeMapView }) => {
+// Define projection definitions
+const projections = {
+    'EPSG:4326': 'EPSG:4326',
+    'EPSG:3857': 'EPSG:3857'
+};
+
+// Example projection definitions
+proj4.defs(projections['EPSG:4326'], '+proj=longlat +datum=WGS84 +no_defs');
+proj4.defs(projections['EPSG:3857'], '+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs');
+
+// Custom polyline decoder function
+function customPolylineDecode(str) {
+    const coordinates = [];
+    let index = 0, lat = 0, lng = 0;
+
+    while (index < str.length) {
+        let result = 1, shift = 0, b;
+        do {
+            b = str.charCodeAt(index++) - 63 - 1;
+            result += b << shift;
+            shift += 5;
+        } while (b >= 0x1f);
+        lat += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+        result = 1;
+        shift = 0;
+        do {
+            b = str.charCodeAt(index++) - 63 - 1;
+            result += b << shift;
+            shift += 5;
+        } while (b >= 0x1f);
+        lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+        coordinates.push([lat * 1e-5, lng * 1e-5]);
+    }
+    return coordinates;
+}
+
+const Routing = ({ map, projection, onChangeMapView }) => {
     const [startLocation, setStartLocation] = useState('');
     const [endLocation, setEndLocation] = useState('');
     const [isSearching, setIsSearching] = useState(false);
-    const [routeLayer, setRouteLayer] = useState(null);
+    const [routeLayerId, setRouteLayerId] = useState(null);
     const [error, setError] = useState(null);
     const [geocodedLocations, setGeocodedLocations] = useState({ start: null, end: null });
 
     useEffect(() => {
-        // Check if map is a valid Leaflet map instance
-        if (map && map instanceof L.Map) {
-            console.log('Valid Leaflet map instance:', map);
-        } else {
-            console.error('The map object is not a Leaflet map:', map);
-        }
-    }, [map]);
+        let isMounted = true;
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const isValidCoordinate = (coord) => {
+        return coord && 
+               typeof coord.lat === 'number' && 
+               typeof coord.lng === 'number' && 
+               isFinite(coord.lat) && 
+               isFinite(coord.lng) &&
+               coord.lat >= -90 && 
+               coord.lat <= 90 && 
+               coord.lng >= -180 && 
+               coord.lng <= 180;
+    };
 
     const geocodeLocation = async (location) => {
         try {
             // Use HERE API for geocoding
-            const hereResponse = await fetch(`https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(location)}&in=countryCode:SRB&apikey=hav622MtM-0chHNAe--c0C95dgiHJRW0mAb0Fpv7A9Y`);
+            const hereResponse = await fetch(`https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(location)}&in=countryCode:SRB&apikey=aC9vErGLcPMX1dChkSb2Ue0gzcNwbMsN4DuuqVndLiA`);
             const hereData = await hereResponse.json();
-            console.log('HERE Geocode API response:', hereData);
-
             if (hereData.items && hereData.items.length > 0) {
                 return hereData.items[0].position;
             }
@@ -42,8 +88,6 @@ const Routing = ({ map, onChangeMapView }) => {
             // Use Nominatim API as a fallback
             const nominatimResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}, Serbia`);
             const nominatimData = await nominatimResponse.json();
-            console.log('Nominatim Geocode API response:', nominatimData);
-
             if (nominatimData && nominatimData.length > 0) {
                 return { lat: parseFloat(nominatimData[0].lat), lng: parseFloat(nominatimData[0].lon) };
             }
@@ -55,17 +99,19 @@ const Routing = ({ map, onChangeMapView }) => {
     };
 
     const fetchHERERoute = async (startCoords, endCoords) => {
-        const response = await fetch(`https://router.hereapi.com/v8/routes?transportMode=car&origin=${startCoords.lat},${startCoords.lng}&destination=${endCoords.lat},${endCoords.lng}&return=polyline,summary&apikey=hav622MtM-0chHNAe--c0C95dgiHJRW0mAb0Fpv7A9Y`);
-        const data = await response.json();
-        console.log('HERE Routing API response:', data);
-        return data;
-    };
-
-    const fetchOSRMRoute = async (startCoords, endCoords) => {
-        const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${startCoords.lng},${startCoords.lat};${endCoords.lng},${endCoords.lat}?overview=full&geometries=polyline`);
-        const data = await response.json();
-        console.log('OSRM Routing API response:', data);
-        return data;
+        try {
+            const response = await fetch(`https://router.hereapi.com/v8/routes?transportMode=car&origin=${startCoords.lat},${startCoords.lng}&destination=${endCoords.lat},${endCoords.lng}&return=polyline,summary&apikey=aC9vErGLcPMX1dChkSb2Ue0gzcNwbMsN4DuuqVndLiA`);
+            const data = await response.json();
+            console.log('HERE API response:', JSON.stringify(data, null, 2));
+            if (data.routes && data.routes.length > 0 && data.routes[0].sections && data.routes[0].sections.length > 0) {
+                return data;
+            } else {
+                throw new Error('HERE routing returned invalid or empty route data');
+            }
+        } catch (error) {
+            console.error('Error fetching HERE route:', error);
+            throw error;
+        }
     };
 
     const handleDrawRoute = async () => {
@@ -79,67 +125,114 @@ const Routing = ({ map, onChangeMapView }) => {
         setGeocodedLocations({ start: null, end: null });
 
         try {
-            // Geocode start location
             const startCoords = await geocodeLocation(startLocation);
-            if (!startCoords || !startCoords.lat || !startCoords.lng) {
-                throw new Error(`Failed to geocode start location: ${startLocation}`);
-            }
-
-            // Geocode end location
             const endCoords = await geocodeLocation(endLocation);
-            if (!endCoords || !endCoords.lat || !endCoords.lng) {
-                throw new Error(`Failed to geocode end location: ${endLocation}`);
+
+            // Check if coordinates are valid
+            if (!isValidCoordinate(startCoords) || !isValidCoordinate(endCoords)) {
+                throw new Error('Invalid coordinates received from geocoding');
             }
 
             setGeocodedLocations({ start: startCoords, end: endCoords });
 
-            // Ensure map is valid
-            if (!map || !(map instanceof L.Map)) {
-                throw new Error('Invalid map instance. Ensure the map object is a Leaflet map.');
+            const routeData = await fetchHERERoute(startCoords, endCoords);
+
+            const polylineEncoded = routeData.routes[0].sections[0].polyline;
+            const summary = routeData.routes[0].sections[0].summary;
+
+            console.log('Raw polyline from HERE API:', polylineEncoded);
+
+            if (!/^[A-Za-z0-9\-_]+$/.test(polylineEncoded)) {
+                throw new Error('Invalid polyline format received from HERE API');
             }
 
-            // Try HERE routing first
-            let routeData = await fetchHERERoute(startCoords, endCoords);
-            let useOSRM = false;
-
-            if (!routeData.routes || routeData.routes.length === 0) {
-                console.log('HERE routing failed, trying OSRM...');
-                routeData = await fetchOSRMRoute(startCoords, endCoords);
-                useOSRM = true;
+            let decodedPolyline;
+            try {
+                decodedPolyline = polyline.decode(polylineEncoded);
+                console.log('Decoded polyline:', decodedPolyline);
+            } catch (decodeError) {
+                console.warn('Failed to decode with @mapbox/polyline, trying custom decoder');
+                decodedPolyline = customPolylineDecode(polylineEncoded);
+                console.log('Custom decoded polyline:', decodedPolyline);
             }
 
-            if ((useOSRM && routeData.code === 'Ok') || (!useOSRM && routeData.routes && routeData.routes.length > 0)) {
-                let polylineEncoded, summary;
-                if (useOSRM) {
-                    polylineEncoded = routeData.routes[0].geometry;
-                    summary = {
-                        length: routeData.routes[0].distance,
-                        duration: routeData.routes[0].duration
+            if (!decodedPolyline.every(coords => isValidCoordinate({ lat: coords[0], lng: coords[1] }))) {
+                throw new Error('Invalid coordinates in decoded polyline');
+            }
+
+            const geojsonRoute = {
+                type: 'FeatureCollection',
+                features: [
+                    {
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: decodedPolyline.map(coords => [coords[1], coords[0]])
+                        },
+                        properties: {
+                            name: 'Route',
+                            distance: summary.length,
+                            duration: summary.duration
+                        }
+                    }
+                ]
+            };
+
+            // Reproject the GeoJSON to the current map projection
+            const reprojectedGeoJSON = {
+                type: 'FeatureCollection',
+                features: geojsonRoute.features.map(feature => {
+                    const reprojectedCoords = feature.geometry.coordinates.map(coord => {
+                        const reprojected = proj4('EPSG:4326', projection, coord);
+                        if (!isValidCoordinate({ lat: reprojected[1], lng: reprojected[0] })) {
+                            throw new Error('Invalid coordinate after reprojection');
+                        }
+                        return reprojected;
+                    });
+                    return {
+                        ...feature,
+                        geometry: {
+                            ...feature.geometry,
+                            coordinates: reprojectedCoords
+                        }
                     };
-                } else {
-                    polylineEncoded = routeData.routes[0].sections[0].polyline;
-                    summary = routeData.routes[0].sections[0].summary;
+                })
+            };
+
+            // Remove existing route layer if present
+            if (routeLayerId && map.getLayers) {
+                const layers = map.getLayers().getArray();
+                const existingLayer = layers.find(layer => layer.get('id') === routeLayerId);
+                if (existingLayer) {
+                    map.removeLayer(existingLayer);
                 }
-
-                const decodedPolyline = polyline.decode(polylineEncoded);
-
-                if (routeLayer) {
-                    map.removeLayer(routeLayer);
-                }
-
-                const newRouteLayer = L.polyline(decodedPolyline, { color: 'blue', weight: 5 }).addTo(map);
-                setRouteLayer(newRouteLayer);
-
-                const bounds = L.latLngBounds(decodedPolyline);
-                onChangeMapView(bounds.getCenter(), 10, bounds);
-
-                setError(`Route found using ${useOSRM ? 'OSRM' : 'HERE'} API! Distance: ${(summary.length / 1000).toFixed(2)} km, Duration: ${(summary.duration / 3600).toFixed(2)} hours`);
-            } else {
-                throw new Error('No route found with either HERE or OSRM APIs');
             }
+
+            // Add the reprojected route to the map as a new layer
+            const newLayer = new ol.layer.Vector({
+                source: new ol.source.Vector({
+                    features: new ol.format.GeoJSON().readFeatures(reprojectedGeoJSON)
+                }),
+                style: new ol.style.Style({
+                    stroke: new ol.style.Stroke({
+                        color: '#0000FF',
+                        width: 5
+                    })
+                })
+            });
+            newLayer.set('id', 'routeLayer');
+
+            map.addLayer(newLayer);
+            setRouteLayerId('routeLayer');
+
+            // Define bounds for the map view
+            const extent = ol.extent.boundingExtent(decodedPolyline.map(c => [c[1], c[0]]));
+            map.getView().fit(ol.proj.transformExtent(extent, 'EPSG:4326', projection), { padding: [50, 50, 50, 50] });
+
+            setError(`Route found! Distance: ${(summary.length / 1000).toFixed(2)} km, Duration: ${(summary.duration / 3600).toFixed(2)} hours`);
         } catch (error) {
             console.error('Error drawing route:', error);
-            setError(`Unable to draw route. ${error.message}`);
+            setError(`Unable to draw route. ${error.message}. Please check the console for more details.`);
         } finally {
             setIsSearching(false);
         }
@@ -161,7 +254,7 @@ const Routing = ({ map, onChangeMapView }) => {
                 type="text"
                 value={startLocation}
                 onChange={(e) => setStartLocation(e.target.value)}
-                placeholder="Start location (e.g., Skopje, North Macedonia)"
+                placeholder="Start location (e.g., Skopje)"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
@@ -169,7 +262,7 @@ const Routing = ({ map, onChangeMapView }) => {
                 type="text"
                 value={endLocation}
                 onChange={(e) => setEndLocation(e.target.value)}
-                placeholder="End location (e.g., Belgrade, Serbia)"
+                placeholder="End location (e.g., Nis)"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
@@ -196,17 +289,16 @@ const Routing = ({ map, onChangeMapView }) => {
     );
 };
 
-// Connect the Routing component to the Redux store
 const ConnectedRouting = connect(
     state => ({
-        map: mapSelector(state)
+        map: mapSelector(state),
+        projection: projectionSelector(state),
     }),
     {
-        onChangeMapView: changeMapView
+        onChangeMapView: changeMapView,
     }
 )(Routing);
 
-// Export the plugin
 export default createPlugin('Routing', {
     component: ConnectedRouting
 });
