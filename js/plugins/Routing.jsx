@@ -1,72 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { connect } from 'react-redux';
 import { createPlugin } from '@mapstore/utils/PluginsUtils';
-import { changeMapView } from '@mapstore/actions/map';
-import { mapSelector } from '@mapstore/selectors/map';
-import L from 'leaflet';
-import polyline from '@mapbox/polyline';
+import { addLayer, removeLayer } from '@mapstore/actions/layers';
+import { zoomToExtent } from '@mapstore/actions/map';
 
-// Define the Routing component
-const Routing = ({ map, onChangeMapView }) => {
+const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [startLocation, setStartLocation] = useState('');
     const [endLocation, setEndLocation] = useState('');
     const [isSearching, setIsSearching] = useState(false);
-    const [routeLayer, setRouteLayer] = useState(null);
     const [error, setError] = useState(null);
-    const [geocodedLocations, setGeocodedLocations] = useState({ start: null, end: null });
-
-    useEffect(() => {
-        // Check if map is a valid Leaflet map instance
-        if (map && map instanceof L.Map) {
-            console.log('Valid Leaflet map instance:', map);
-        } else {
-            console.error('The map object is not a Leaflet map:', map);
-        }
-    }, [map]);
-
-    const geocodeLocation = async (location) => {
-        try {
-            // Use HERE API for geocoding
-            const hereResponse = await fetch(`https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(location)}&in=countryCode:SRB&apikey=hav622MtM-0chHNAe--c0C95dgiHJRW0mAb0Fpv7A9Y`);
-            const hereData = await hereResponse.json();
-            console.log('HERE Geocode API response:', hereData);
-
-            if (hereData.items && hereData.items.length > 0) {
-                return hereData.items[0].position;
-            }
-        } catch (error) {
-            console.error('Error with HERE geocoding:', error);
-        }
-
-        try {
-            // Use Nominatim API as a fallback
-            const nominatimResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}, Serbia`);
-            const nominatimData = await nominatimResponse.json();
-            console.log('Nominatim Geocode API response:', nominatimData);
-
-            if (nominatimData && nominatimData.length > 0) {
-                return { lat: parseFloat(nominatimData[0].lat), lng: parseFloat(nominatimData[0].lon) };
-            }
-        } catch (error) {
-            console.error('Error with Nominatim geocoding:', error);
-        }
-
-        throw new Error(`Could not geocode location: ${location}`);
-    };
-
-    const fetchHERERoute = async (startCoords, endCoords) => {
-        const response = await fetch(`https://router.hereapi.com/v8/routes?transportMode=car&origin=${startCoords.lat},${startCoords.lng}&destination=${endCoords.lat},${endCoords.lng}&return=polyline,summary&apikey=hav622MtM-0chHNAe--c0C95dgiHJRW0mAb0Fpv7A9Y`);
-        const data = await response.json();
-        console.log('HERE Routing API response:', data);
-        return data;
-    };
-
-    const fetchOSRMRoute = async (startCoords, endCoords) => {
-        const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${startCoords.lng},${startCoords.lat};${endCoords.lng},${endCoords.lat}?overview=full&geometries=polyline`);
-        const data = await response.json();
-        console.log('OSRM Routing API response:', data);
-        return data;
-    };
 
     const handleDrawRoute = async () => {
         if (!startLocation.trim() || !endLocation.trim()) {
@@ -76,72 +18,107 @@ const Routing = ({ map, onChangeMapView }) => {
 
         setIsSearching(true);
         setError(null);
-        setGeocodedLocations({ start: null, end: null });
 
         try {
-            // Geocode start location
             const startCoords = await geocodeLocation(startLocation);
-            if (!startCoords || !startCoords.lat || !startCoords.lng) {
-                throw new Error(`Failed to geocode start location: ${startLocation}`);
-            }
-
-            // Geocode end location
             const endCoords = await geocodeLocation(endLocation);
-            if (!endCoords || !endCoords.lat || !endCoords.lng) {
-                throw new Error(`Failed to geocode end location: ${endLocation}`);
-            }
 
-            setGeocodedLocations({ start: startCoords, end: endCoords });
+            const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${startCoords.lon},${startCoords.lat};${endCoords.lon},${endCoords.lat}?overview=full&geometries=geojson`);
+            const data = await response.json();
 
-            // Ensure map is valid
-            if (!map || !(map instanceof L.Map)) {
-                throw new Error('Invalid map instance. Ensure the map object is a Leaflet map.');
-            }
+            if (data.routes && data.routes.length > 0) {
+                const route = data.routes[0];
+                drawRoute(route.geometry.coordinates, startCoords, endCoords);
 
-            // Try HERE routing first
-            let routeData = await fetchHERERoute(startCoords, endCoords);
-            let useOSRM = false;
-
-            if (!routeData.routes || routeData.routes.length === 0) {
-                console.log('HERE routing failed, trying OSRM...');
-                routeData = await fetchOSRMRoute(startCoords, endCoords);
-                useOSRM = true;
-            }
-
-            if ((useOSRM && routeData.code === 'Ok') || (!useOSRM && routeData.routes && routeData.routes.length > 0)) {
-                let polylineEncoded, summary;
-                if (useOSRM) {
-                    polylineEncoded = routeData.routes[0].geometry;
-                    summary = {
-                        length: routeData.routes[0].distance,
-                        duration: routeData.routes[0].duration
-                    };
-                } else {
-                    polylineEncoded = routeData.routes[0].sections[0].polyline;
-                    summary = routeData.routes[0].sections[0].summary;
-                }
-
-                const decodedPolyline = polyline.decode(polylineEncoded);
-
-                if (routeLayer) {
-                    map.removeLayer(routeLayer);
-                }
-
-                const newRouteLayer = L.polyline(decodedPolyline, { color: 'blue', weight: 5 }).addTo(map);
-                setRouteLayer(newRouteLayer);
-
-                const bounds = L.latLngBounds(decodedPolyline);
-                onChangeMapView(bounds.getCenter(), 10, bounds);
-
-                setError(`Route found using ${useOSRM ? 'OSRM' : 'HERE'} API! Distance: ${(summary.length / 1000).toFixed(2)} km, Duration: ${(summary.duration / 3600).toFixed(2)} hours`);
+                const distance = route.distance / 1000; // Convert to km
+                const duration = route.duration / 60; // Convert to minutes
+                setError(`Route found! Distance: ${distance.toFixed(2)} km, Duration: ${duration.toFixed(0)} minutes`);
             } else {
-                throw new Error('No route found with either HERE or OSRM APIs');
+                setError('No routes found.');
             }
         } catch (error) {
             console.error('Error drawing route:', error);
             setError(`Unable to draw route. ${error.message}`);
         } finally {
             setIsSearching(false);
+        }
+    };
+
+    const drawRoute = (coordinates, startCoords, endCoords) => {
+        // Remove existing route layer if any
+        removeLayer('routeLayer');
+
+        // Create a GeoJSON feature for the route
+        const routeFeature = {
+            type: 'Feature',
+            geometry: {
+                type: 'LineString',
+                coordinates: coordinates
+            }
+        };
+
+        // Create GeoJSON features for start and end points
+        const startFeature = {
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [startCoords.lon, startCoords.lat]
+            }
+        };
+
+        const endFeature = {
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [endCoords.lon, endCoords.lat]
+            }
+        };
+
+        // Add the new layer to the map
+        addLayer({
+            id: 'routeLayer',
+            name: 'Route',
+            type: 'vector',
+            visibility: true,
+            features: [routeFeature, startFeature, endFeature],
+            style: {
+                weight: 4,
+                opacity: 1,
+                color: 'blue',
+                fillColor: 'red',
+                fillOpacity: 1,
+                radius: 6
+            }
+        });
+
+        // Zoom to the route extent
+        const bounds = getBounds(coordinates);
+        zoomToExtent(bounds, 'EPSG:4326');
+    };
+
+    const getBounds = (coordinates) => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        coordinates.forEach(([x, y]) => {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+        });
+        return [minX, minY, maxX, maxY];
+    };
+
+    const geocodeLocation = async (location) => {
+        try {
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
+            const data = await response.json();
+            if (data && data.length > 0) {
+                return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            } else {
+                throw new Error(`Location not found: ${location}`);
+            }
+        } catch (error) {
+            console.error('Geocoding error:', error);
+            throw new Error(`Failed to geocode location: ${location}`);
         }
     };
 
@@ -161,7 +138,7 @@ const Routing = ({ map, onChangeMapView }) => {
                 type="text"
                 value={startLocation}
                 onChange={(e) => setStartLocation(e.target.value)}
-                placeholder="Start location (e.g., Skopje, North Macedonia)"
+                placeholder="Start location"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
@@ -169,7 +146,7 @@ const Routing = ({ map, onChangeMapView }) => {
                 type="text"
                 value={endLocation}
                 onChange={(e) => setEndLocation(e.target.value)}
-                placeholder="End location (e.g., Belgrade, Serbia)"
+                placeholder="End location"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
@@ -186,27 +163,19 @@ const Routing = ({ map, onChangeMapView }) => {
                     {error}
                 </div>
             )}
-            {geocodedLocations.start && geocodedLocations.end && (
-                <div style={{ marginTop: '8px', fontSize: '12px' }}>
-                    <div>Start: {geocodedLocations.start.lat}, {geocodedLocations.start.lng}</div>
-                    <div>End: {geocodedLocations.end.lat}, {geocodedLocations.end.lng}</div>
-                </div>
-            )}
         </div>
     );
 };
 
-// Connect the Routing component to the Redux store
 const ConnectedRouting = connect(
-    state => ({
-        map: mapSelector(state)
-    }),
+    null,
     {
-        onChangeMapView: changeMapView
+        addLayer,
+        removeLayer,
+        zoomToExtent
     }
 )(Routing);
 
-// Export the plugin
 export default createPlugin('Routing', {
     component: ConnectedRouting
 });
