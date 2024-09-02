@@ -116,8 +116,11 @@
         "webpack-dev-server": "3.11.0"
     },
     "dependencies": {
+        "@here/maps-api-for-javascript": "^1.57.0",
         "@mapbox/polyline": "^1.2.1",
-        "mapstore2": "file:MapStore2"
+        "mapstore2": "file:MapStore2",
+        "polyline": "^0.2.0",
+        "react-leaflet": "^4.2.1"
     },
     "scripts": {
         "start": "npm run app:start",

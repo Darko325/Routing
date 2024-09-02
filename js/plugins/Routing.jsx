@@ -1,14 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { connect } from 'react-redux';
 import { createPlugin } from '@mapstore/utils/PluginsUtils';
 import { addLayer, removeLayer } from '@mapstore/actions/layers';
 import { zoomToExtent } from '@mapstore/actions/map';
+
+const HERE_API_KEY = 'aC9vErGLcPMX1dChkSb2Ue0gzcNwbMsN4DuuqVndLiA';
 
 const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [startLocation, setStartLocation] = useState('');
     const [endLocation, setEndLocation] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [error, setError] = useState(null);
+
+    useEffect(() => {
+        // Load HERE Maps API script
+        const script = document.createElement('script');
+        script.src = `https://js.api.here.com/v3/3.1/mapsjs-core.js`;
+        script.async = true;
+        document.body.appendChild(script);
+
+        script.onload = () => {
+            const script2 = document.createElement('script');
+            script2.src = `https://js.api.here.com/v3/3.1/mapsjs-service.js`;
+            script2.async = true;
+            document.body.appendChild(script2);
+        };
+
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, []);
 
     const handleDrawRoute = async () => {
         if (!startLocation.trim() || !endLocation.trim()) {
@@ -23,18 +44,22 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             const startCoords = await geocodeLocation(startLocation);
             const endCoords = await geocodeLocation(endLocation);
 
-            const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${startCoords.lon},${startCoords.lat};${endCoords.lon},${endCoords.lat}?overview=full&geometries=geojson`);
-            const data = await response.json();
+            const route = await getRoute(startCoords, endCoords);
+            console.log('Route data:', JSON.stringify(route, null, 2)); // Debug log
 
-            if (data.routes && data.routes.length > 0) {
-                const route = data.routes[0];
-                drawRoute(route.geometry.coordinates, startCoords, endCoords);
+            if (route && route.routes && route.routes[0] && route.routes[0].sections) {
+                const section = route.routes[0].sections[0];
+                if (section.polyline) {
+                    drawRoute(section.polyline, startCoords, endCoords);
 
-                const distance = route.distance / 1000; // Convert to km
-                const duration = route.duration / 60; // Convert to minutes
-                setError(`Route found! Distance: ${distance.toFixed(2)} km, Duration: ${duration.toFixed(0)} minutes`);
+                    const distance = section.summary.length / 1000; // Convert to km
+                    const duration = section.summary.duration / 60; // Convert to minutes
+                    setError(`Route found! Distance: ${distance.toFixed(2)} km, Duration: ${duration.toFixed(0)} minutes`);
+                } else {
+                    throw new Error('No polyline data in the route response');
+                }
             } else {
-                setError('No routes found.');
+                throw new Error('Unexpected route data structure');
             }
         } catch (error) {
             console.error('Error drawing route:', error);
@@ -44,16 +69,25 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         }
     };
 
-    const drawRoute = (coordinates, startCoords, endCoords) => {
+    const drawRoute = (polyline, startCoords, endCoords) => {
         // Remove existing route layer if any
         removeLayer('routeLayer');
+
+        // Decode the flexible polyline
+        const H = window.H;
+        const lineString = H.geo.LineString.fromFlexiblePolyline(polyline);
+        const routeCoordinates = lineString.getLatLngAltArray();
 
         // Create a GeoJSON feature for the route
         const routeFeature = {
             type: 'Feature',
             geometry: {
                 type: 'LineString',
-                coordinates: coordinates
+                coordinates: routeCoordinates.map((coord, index) => {
+                    if (index % 3 === 0) {
+                        return [routeCoordinates[index + 1], routeCoordinates[index]];
+                    }
+                }).filter(Boolean)
             }
         };
 
@@ -62,7 +96,7 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             type: 'Feature',
             geometry: {
                 type: 'Point',
-                coordinates: [startCoords.lon, startCoords.lat]
+                coordinates: [startCoords.lng, startCoords.lat]
             }
         };
 
@@ -70,7 +104,7 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             type: 'Feature',
             geometry: {
                 type: 'Point',
-                coordinates: [endCoords.lon, endCoords.lat]
+                coordinates: [endCoords.lng, endCoords.lat]
             }
         };
 
@@ -92,33 +126,54 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         });
 
         // Zoom to the route extent
-        const bounds = getBounds(coordinates);
+        const bounds = getBounds(routeFeature.geometry.coordinates);
         zoomToExtent(bounds, 'EPSG:4326');
     };
 
     const getBounds = (coordinates) => {
+        if (!Array.isArray(coordinates) || coordinates.length === 0) {
+            console.error('Invalid coordinates:', coordinates);
+            return [-180, -90, 180, 90]; // Default to world bounds
+        }
+
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        coordinates.forEach(([x, y]) => {
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
+        coordinates.forEach(coord => {
+            if (Array.isArray(coord) && coord.length >= 2) {
+                const [x, y] = coord;
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+            }
         });
+
         return [minX, minY, maxX, maxY];
     };
 
     const geocodeLocation = async (location) => {
         try {
-            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
+            const response = await fetch(`https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(location)}&apiKey=${HERE_API_KEY}`);
             const data = await response.json();
-            if (data && data.length > 0) {
-                return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            if (data && data.items && data.items.length > 0) {
+                const { position } = data.items[0];
+                return { lat: position.lat, lng: position.lng };
             } else {
                 throw new Error(`Location not found: ${location}`);
             }
         } catch (error) {
             console.error('Geocoding error:', error);
             throw new Error(`Failed to geocode location: ${location}`);
+        }
+    };
+
+    const getRoute = async (startCoords, endCoords) => {
+        const url = `https://router.hereapi.com/v8/routes?transportMode=car&origin=${startCoords.lat},${startCoords.lng}&destination=${endCoords.lat},${endCoords.lng}&return=polyline,summary&apiKey=${HERE_API_KEY}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.routes && data.routes.length > 0) {
+            return data;
+        } else {
+            throw new Error('No routes found.');
         }
     };
 
