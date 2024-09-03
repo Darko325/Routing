@@ -9,27 +9,50 @@ const HERE_API_KEY = 'aC9vErGLcPMX1dChkSb2Ue0gzcNwbMsN4DuuqVndLiA';
 const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [startLocation, setStartLocation] = useState('');
     const [endLocation, setEndLocation] = useState('');
+    const [startSuggestions, setStartSuggestions] = useState([]);
+    const [endSuggestions, setEndSuggestions] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [error, setError] = useState(null);
 
     useEffect(() => {
         // Load HERE Maps API script
         const script = document.createElement('script');
-        script.src = `https://js.api.here.com/v3/3.1/mapsjs-core.js`;
+        script.src = "https://js.api.here.com/v3/3.1/mapsjs-core.js";
         script.async = true;
         document.body.appendChild(script);
 
         script.onload = () => {
             const script2 = document.createElement('script');
-            script2.src = `https://js.api.here.com/v3/3.1/mapsjs-service.js`;
+            script2.src = "https://js.api.here.com/v3/3.1/mapsjs-service.js";
             script2.async = true;
             document.body.appendChild(script2);
         };
 
         return () => {
             document.body.removeChild(script);
+            document.body.removeChild(script2);
         };
     }, []);
+
+    const fetchSuggestions = async (query, setSuggestions) => {
+        if (query.trim() === '') {
+            setSuggestions([]);
+            return;
+        }
+
+        try {
+            const response = await fetch(`https://autocomplete.search.hereapi.com/v1/autocomplete?q=${encodeURIComponent(query)}&apiKey=${HERE_API_KEY}`);
+            const data = await response.json();
+            if (data && data.items) {
+                setSuggestions(data.items.map(item => item.title));
+            } else {
+                setSuggestions([]);
+            }
+        } catch (error) {
+            console.error('Error fetching suggestions:', error);
+            setSuggestions([]);
+        }
+    };
 
     const handleDrawRoute = async () => {
         if (!startLocation.trim() || !endLocation.trim()) {
@@ -192,19 +215,81 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             <input
                 type="text"
                 value={startLocation}
-                onChange={(e) => setStartLocation(e.target.value)}
+                onChange={(e) => {
+                    setStartLocation(e.target.value);
+                    fetchSuggestions(e.target.value, setStartSuggestions);
+                }}
+                onBlur={() => setTimeout(() => setStartSuggestions([]), 200)}
                 placeholder="Start location"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
+            {startSuggestions.length > 0 && (
+                <ul style={{
+                    listStyleType: 'none',
+                    margin: 0,
+                    padding: 0,
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                    position: 'absolute',
+                    backgroundColor: '#fff',
+                    zIndex: 100
+                }}>
+                    {startSuggestions.map((suggestion, index) => (
+                        <li
+                            key={index}
+                            onClick={() => {
+                                setStartLocation(suggestion);
+                                setStartSuggestions([]);
+                            }}
+                            style={{ cursor: 'pointer', padding: '4px 8px' }}
+                        >
+                            {suggestion}
+                        </li>
+                    ))}
+                </ul>
+            )}
             <input
                 type="text"
                 value={endLocation}
-                onChange={(e) => setEndLocation(e.target.value)}
+                onChange={(e) => {
+                    setEndLocation(e.target.value);
+                    fetchSuggestions(e.target.value, setEndSuggestions);
+                }}
+                onBlur={() => setTimeout(() => setEndSuggestions([]), 200)}
                 placeholder="End location"
                 className="form-control"
                 style={{ marginBottom: '8px' }}
             />
+            {endSuggestions.length > 0 && (
+                <ul style={{
+                    listStyleType: 'none',
+                    margin: 0,
+                    padding: 0,
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                    position: 'absolute',
+                    backgroundColor: '#fff',
+                    zIndex: 100
+                }}>
+                    {endSuggestions.map((suggestion, index) => (
+                        <li
+                            key={index}
+                            onClick={() => {
+                                setEndLocation(suggestion);
+                                setEndSuggestions([]);
+                            }}
+                            style={{ cursor: 'pointer', padding: '4px 8px' }}
+                        >
+                            {suggestion}
+                        </li>
+                    ))}
+                </ul>
+            )}
             <button
                 className="btn btn-primary"
                 onClick={handleDrawRoute}
