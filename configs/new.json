@@ -50,6 +50,24 @@
         "singleTile": false
       },
       {
+        "type": "tileprovider",
+        "title": "HERE Vector Trucking",
+        "provider": "custom",
+        "name": "Vector_Trucking",
+        "url": "https://1.base.maps.ls.hereapi.com/maptile/2.1/trucktile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey=As5p0f18iAiWyIJITGtrhpsr5Mi4xSEqPTqj5fTWkuc",
+        "group": "background",
+        "visibility": false
+      },
+      {
+        "type": "tileprovider",
+        "title": "HERE Satellite Day Hybrid",
+        "provider": "custom",
+        "name": "Satelit_Hybrid",
+        "url": "http://1.aerial.maps.cit.api.here.com/maptile/2.1/maptile/newest/hybrid.day/{z}/{x}/{y}/256/png8?app_id=eAdkWGYRoc4RfxVo0Z4B&app_code=TrLJuXVK62IQk0vuXFzaig&lg=eng",
+        "group": "background",
+        "visibility": true
+      },   
+      {
         "source": "ol",
         "group": "background",
         "title": "Empty Background",
