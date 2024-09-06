@@ -97,26 +97,53 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     };
 
     const addMarker = (coords, address, type) => {
-        const H = window.H;
-        const marker = new H.map.Marker({ lat: coords.lat, lng: coords.lng });
-        marker.setData(`<div>${type.charAt(0).toUpperCase() + type.slice(1)}: ${address}</div>`);
-        marker.addEventListener('tap', function (evt) {
-            const bubble = new H.ui.InfoBubble(evt.target.getGeometry(), {
-                content: evt.target.getData()
-            });
-            ui.addBubble(bubble);
-        });
-
+        // Create a GeoJSON feature for the marker
+        const markerFeature = {
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [coords.lng, coords.lat]
+            },
+            properties: {
+                type: type,
+                address: address
+            }
+        };
+    
+        // Define styles for start and end markers
+        const startStyle = {
+            iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="#00FF00"/>
+                    <circle cx="12" cy="8" r="4" fill="white"/>
+                </svg>
+            `),
+            iconSize: [24, 24],
+            iconAnchor: [12, 24]
+        };
+    
+        const endStyle = {
+            iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="#FF0000"/>
+                    <circle cx="12" cy="8" r="4" fill="white"/>
+                </svg>
+            `),
+            iconSize: [24, 24],
+            iconAnchor: [12, 24]
+        };
+    
+        // Add the layer with the marker
         addLayer({
             id: `${type}MarkerLayer`,
             name: `${type.charAt(0).toUpperCase() + type.slice(1)} Marker`,
             type: 'vector',
             visibility: true,
-            features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [coords.lng, coords.lat] } }],
-            style: { weight: 4, opacity: 1, color: 'blue', fillColor: 'red', fillOpacity: 1, radius: 6 }
+            features: [markerFeature],
+            style: type === 'start' ? startStyle : endStyle
         });
     };
-
+    
     const getRoute = async (startCoords, endCoords) => {
         const url = `https://router.hereapi.com/v8/routes?transportMode=car&origin=${startCoords.lat},${startCoords.lng}&destination=${endCoords.lat},${endCoords.lng}&return=polyline,summary&apiKey=${HERE_API_KEY}`;
         const response = await fetch(url);
