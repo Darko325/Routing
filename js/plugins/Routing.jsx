@@ -3,9 +3,9 @@ import { connect } from 'react-redux';
 import { createPlugin } from '@mapstore/utils/PluginsUtils';
 import { addLayer, removeLayer } from '@mapstore/actions/layers';
 import { zoomToExtent } from '@mapstore/actions/map';
-import './Routing.css';  // Add this line
+import './Routing.css';
 
-const HERE_API_KEY = 'aC9vErGLcPMX1dChkSb2Ue0gzcNwbMsN4DuuqVndLiA';
+const HERE_API_KEY = 'xR3aaz-LsnU5pfO-VzjmD3Y2WGoigNkOKbw5Xapz7HY';
 
 const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [locations, setLocations] = useState({ start: '', end: '' });
@@ -28,6 +28,7 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             try {
                 await loadScript("https://js.api.here.com/v3/3.1/mapsjs-core.js");
                 await loadScript("https://js.api.here.com/v3/3.1/mapsjs-service.js");
+                await loadScript("https://js.api.here.com/v3/3.1/mapsjs-mapevents.js"); // Load map events script
             } catch (error) {
                 console.error('Failed to load HERE Maps API:', error);
             }
@@ -58,18 +59,62 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         fetchSuggestions(value, type);
     };
 
-    const handleSuggestionClick = (suggestion, type) => {
+    const handleSuggestionClick = async (suggestion, type) => {
         setLocations(prev => ({ ...prev, [type]: suggestion }));
         setSuggestions(prev => ({ ...prev, [type]: [] }));
+
+        // Geocode the selected suggestion and zoom to that location
+        try {
+            const { coords, address } = await geocodeLocation(suggestion);
+            zoomToLocation(coords);
+            addMarker(coords, address, type);
+        } catch (error) {
+            console.error(`Error zooming to ${type} location:`, error);
+        }
     };
 
     const geocodeLocation = async (location) => {
         const response = await fetch(`https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(location)}&apiKey=${HERE_API_KEY}`);
         const data = await response.json();
         if (data?.items?.[0]?.position) {
-            return data.items[0].position;
+            return {
+                coords: data.items[0].position,
+                address: data.items[0].title // Get the address
+            };
         }
         throw new Error(`Location not found: ${location}`);
+    };
+
+    const zoomToLocation = (coords) => {
+        const bufferDegrees = 0.02; // Adjust this value to change the zoom level
+        const extent = [
+            coords.lng - bufferDegrees,
+            coords.lat - bufferDegrees,
+            coords.lng + bufferDegrees,
+            coords.lat + bufferDegrees
+        ];
+        zoomToExtent(extent, 'EPSG:4326');
+    };
+
+    const addMarker = (coords, address, type) => {
+        const H = window.H;
+        const marker = new H.map.Marker({ lat: coords.lat, lng: coords.lng });
+        marker.setData(`<div>${type.charAt(0).toUpperCase() + type.slice(1)}: ${address}</div>`);
+        marker.addEventListener('tap', function (evt) {
+            const bubble = new H.ui.InfoBubble(evt.target.getGeometry(), {
+                content: evt.target.getData()
+            });
+            ui.addBubble(bubble);
+        });
+
+        addLayer({
+            id: `${type}MarkerLayer`,
+            name: `${type.charAt(0).toUpperCase() + type.slice(1)} Marker`,
+            type: 'vector',
+            visibility: true,
+            features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [coords.lng, coords.lat] } }],
+            style: { weight: 4, opacity: 1, color: 'blue', fillColor: 'red', fillOpacity: 1, radius: 6 }
+        });
     };
 
     const getRoute = async (startCoords, endCoords) => {
@@ -123,11 +168,11 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         try {
             const startCoords = await geocodeLocation(locations.start);
             const endCoords = await geocodeLocation(locations.end);
-            const route = await getRoute(startCoords, endCoords);
+            const route = await getRoute(startCoords.coords, endCoords.coords);
 
             const section = route.routes[0].sections[0];
             if (section.polyline) {
-                drawRoute(section.polyline, startCoords, endCoords);
+                drawRoute(section.polyline, startCoords.coords, endCoords.coords);
                 const distance = (section.summary.length / 1000).toFixed(2);
                 const duration = Math.round(section.summary.duration / 60);
                 setStatus({ isSearching: false, message: `Route found! Distance: ${distance} km, Duration: ${duration} minutes` });

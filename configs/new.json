@@ -15,7 +15,7 @@
 				"name": "mapnik",
         "source": "osm",
 				"group": "background",
-        "visibility": true
+        "visibility": false
 			},
       {
         "type": "tileprovider",
@@ -54,7 +54,7 @@
         "title": "HERE Vector Trucking",
         "provider": "custom",
         "name": "Vector_Trucking",
-        "url": "https://1.base.maps.ls.hereapi.com/maptile/2.1/trucktile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey=As5p0f18iAiWyIJITGtrhpsr5Mi4xSEqPTqj5fTWkuc",
+        "url": "https://1.base.maps.ls.hereapi.com/maptile/2.1/trucktile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey=xR3aaz-LsnU5pfO-VzjmD3Y2WGoigNkOKbw5Xapz7HY",
         "group": "background",
         "visibility": false
       },
