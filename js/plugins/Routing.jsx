@@ -3,9 +3,8 @@ import { connect } from 'react-redux';
 import { createPlugin } from '@mapstore/utils/PluginsUtils';
 import { addLayer, removeLayer } from '@mapstore/actions/layers';
 import { zoomToExtent } from '@mapstore/actions/map';
+import { HERE_API_KEY, loadHereMapsAPI } from './hereMapsApiConfig';
 import './Routing.css';
-
-const HERE_API_KEY = 'xR3aaz-LsnU5pfO-VzjmD3Y2WGoigNkOKbw5Xapz7HY';
 
 const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [locations, setLocations] = useState({ start: '', end: '' });
@@ -13,27 +12,6 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     const [status, setStatus] = useState({ isSearching: false, message: null });
 
     useEffect(() => {
-        const loadScript = (src) => {
-            return new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = src;
-                script.async = true;
-                script.onload = resolve;
-                script.onerror = reject;
-                document.body.appendChild(script);
-            });
-        };
-
-        const loadHereMapsAPI = async () => {
-            try {
-                await loadScript("https://js.api.here.com/v3/3.1/mapsjs-core.js");
-                await loadScript("https://js.api.here.com/v3/3.1/mapsjs-service.js");
-                await loadScript("https://js.api.here.com/v3/3.1/mapsjs-mapevents.js"); // Load map events script
-            } catch (error) {
-                console.error('Failed to load HERE Maps API:', error);
-            }
-        };
-
         loadHereMapsAPI();
     }, []);
 
@@ -63,7 +41,6 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         setLocations(prev => ({ ...prev, [type]: suggestion }));
         setSuggestions(prev => ({ ...prev, [type]: [] }));
 
-        // Geocode the selected suggestion and zoom to that location
         try {
             const { coords, address } = await geocodeLocation(suggestion);
             zoomToLocation(coords);
@@ -79,14 +56,14 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
         if (data?.items?.[0]?.position) {
             return {
                 coords: data.items[0].position,
-                address: data.items[0].title // Get the address
+                address: data.items[0].title
             };
         }
         throw new Error(`Location not found: ${location}`);
     };
 
     const zoomToLocation = (coords) => {
-        const bufferDegrees = 0.02; // Adjust this value to change the zoom level
+        const bufferDegrees = 0.02;
         const extent = [
             coords.lng - bufferDegrees,
             coords.lat - bufferDegrees,
@@ -97,7 +74,6 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
     };
 
     const addMarker = (coords, address, type) => {
-        // Create a GeoJSON feature for the marker
         const markerFeature = {
             type: 'Feature',
             geometry: {
@@ -110,7 +86,6 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             }
         };
     
-        // Define styles for start and end markers
         const startStyle = {
             iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
                 <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
@@ -133,7 +108,6 @@ const Routing = ({ addLayer, removeLayer, zoomToExtent }) => {
             iconAnchor: [12, 24]
         };
     
-        // Add the layer with the marker
         addLayer({
             id: `${type}MarkerLayer`,
             name: `${type.charAt(0).toUpperCase() + type.slice(1)} Marker`,
